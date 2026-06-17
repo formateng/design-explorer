@@ -106,7 +106,7 @@ function getUrlVars(rawUrl) {
     return vars;
 }
 
-var Gkey = "AIzaSyCSrF08UMawxKIb0m4JsA1mYE5NMmP36bY";
+var Gkey = localStorage.getItem('gdrive_api_key') || "AIzaSyALPI3DXNxFPuHHdh78ZJhw1Emn6XmpHhY";
 var BitlyKey = "52e99e2d788d32ae8ea99007d96917ac4ba50a5a";
 
 function prepareGFolder(folderLink) {
@@ -128,11 +128,22 @@ function prepareGFolder(folderLink) {
 
     folder = folderLink;
 
-    d3.json(folder.url, function (data) {
+    d3.json(folder.url, function (error, data) {
         var csvFiles = {};
         var imgFiles ={};
         var jsonFiles ={};
         var settingFiles ={};
+
+        if (error) {
+            console.error("Error loading folder contents:", error);
+            alert("Error listing Google Drive folder files.\n\nThe API key may have expired or is invalid, or the folder is not shared publicly ('Anyone with the link can view').\n\nYou can configure a new API key in the 'Get Data' popup.\n\nError details: " + (error.statusText || error.responseText || "Connection failed"));
+            return;
+        }
+
+        if (!data || !data.files) {
+            alert("Error: No files found in this folder. Please verify the folder contents.");
+            return;
+        }
 
         if (folder.type=== "GoogleDrive") { //this is google returned obj
             data.files.forEach(function (item) {
@@ -145,7 +156,7 @@ function prepareGFolder(folderLink) {
                     csvFiles[item.name] = GLink;
                     
                 }else if(item.mimeType.startsWith("image")){
-                    GLink = "https://docs.google.com/uc?id=" + item.id + "&export=download";
+                    GLink = "https://drive.google.com/thumbnail?id=" + item.id +"&sz=w1000";
                     //this item is a image file
                     imgFiles[item.name] = GLink;
 
@@ -249,11 +260,31 @@ function MP_getGoogleIDandLoad(dataMethod) {
     
     document.getElementById('csv-file').value = "";
 
+    // Save custom API key if entered in UI
+    var apiKeyInput = document.getElementById("gdriveApiKey");
+    if (apiKeyInput && apiKeyInput.value.trim() !== "") {
+        Gkey = apiKeyInput.value.trim();
+        localStorage.setItem('gdrive_api_key', Gkey);
+    }
+
     if (dataMethod === "URL") {
         
         document.getElementById("folderLink").value = "";
 
         var inUrl = window.location.href;
+        
+        // Parse API key from URL parameters if present
+        var urlVars = getUrlVars(inUrl);
+        if (urlVars.GKEY !== undefined) {
+            Gkey = urlVars.GKEY;
+            localStorage.setItem('gdrive_api_key', Gkey);
+            if (apiKeyInput) apiKeyInput.value = Gkey;
+        } else if (urlVars.KEY !== undefined) {
+            Gkey = urlVars.KEY;
+            localStorage.setItem('gdrive_api_key', Gkey);
+            if (apiKeyInput) apiKeyInput.value = Gkey;
+        }
+
         decodeUrlID(
             inUrl, 
             function(d){
@@ -361,27 +392,55 @@ function decodeUrl(encodedString) {
 }
 
 function getGFolderID(link) {
-    var linkID;
-
-    if (link.includes("google.com")) {
-
-        if (link.includes("?usp=sharing")) {
-            linkID = link.replace("?usp=sharing", "");
-        } else if (link.includes("open?id=")) {
-            linkID = link.replace("open?id=", "");
-        } else {
-            linkID = link;
+    var folderId = "";
+    try {
+        var cleanLink = link.trim();
+        if (cleanLink.endsWith("/")) {
+            cleanLink = cleanLink.slice(0, -1);
         }
+        
+        if (cleanLink.includes("google.com")) {
+            var urlObj;
+            try {
+                urlObj = new URL(cleanLink);
+            } catch (e) {
+                // Ignore parsing errors and fall back
+            }
 
-        linkID = linkID.split("/");
-        linkID = linkID[linkID.length - 1];
-
-    } else {
-        //server link or ms
-        linkID = link;
+            if (urlObj) {
+                if (urlObj.searchParams && urlObj.searchParams.has("id")) {
+                    folderId = urlObj.searchParams.get("id");
+                } else {
+                    var pathParts = urlObj.pathname.split("/");
+                    var foldersIndex = pathParts.indexOf("folders");
+                    if (foldersIndex !== -1 && foldersIndex + 1 < pathParts.length) {
+                        folderId = pathParts[foldersIndex + 1];
+                    } else {
+                        folderId = pathParts.filter(Boolean).pop() || "";
+                    }
+                }
+            } else {
+                var match = cleanLink.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+                if (match) {
+                    folderId = match[1];
+                } else {
+                    match = cleanLink.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+                    if (match) {
+                        folderId = match[1];
+                    } else {
+                        var lastPart = cleanLink.split("/").pop();
+                        folderId = lastPart.split("?")[0].split("&")[0];
+                    }
+                }
+            }
+        } else {
+            folderId = cleanLink.split("?")[0].split("&")[0];
+        }
+    } catch (err) {
+        console.error("Error parsing Google Drive link:", err);
+        folderId = link;
     }
-
-    return linkID;
+    return folderId.trim();
 }
 
 function CopyToClipboard(element) {

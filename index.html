@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <!--
 //The MIT License (MIT)
 //
@@ -32,10 +32,15 @@
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="">
-    <meta name="author" content="">
+    <meta name="description" content="Parametric Design Explorer with custom branding for Format.">
+    <meta name="author" content="Format">
 
-    <title>Design Explorer</title>
+    <title>Format | Design Explorer</title>
+
+    <!-- Google Fonts: Work Sans & Droid Sans Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Droid+Sans+Mono&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
     <link rel="shortcut icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
@@ -102,6 +107,8 @@
     <link href="./rating_source_files/jquery.rating.css" type="text/css" rel="stylesheet" />
 
 
+    <!-- JSZip for local zip extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="./js/divgrid.js"></script>
     <!-- Design Explorer Scripts -->
     <script src="./js/designExplorer.js" type="text/javascript" language="javascript"></script>
@@ -144,11 +151,23 @@
         if (csvFilePathLink.length > 0) {
             // remove the current selection
             unloadPageContent();
-            d3.csv(csvFilePathLink, function (data) {
+            
+            Pace.restart();
+            
+            d3.csv(csvFilePathLink, function (error, data) {
+                if (error) {
+                    console.error("Error loading CSV:", error);
+                    alert("Failed to load CSV file. Please make sure the URL is accessible and, if using Google Drive, that your API key is valid and the folder is publicly shared.");
+                    return;
+                }
+                if (!data || data.length === 0) {
+                    alert("The loaded CSV data is empty or invalid. Please check the file.");
+                    return;
+                }
                 loadDataToDesignExplorer(data);
                 loadSetting();
                 updateLayoutOnDeselect();
-            } );
+            });
             //window.prompt only if user input data, not from URL
             if (document.getElementById("folderLink").value) {
                 showStillLink();
@@ -168,16 +187,16 @@
         
         // no img link
         if(file === 0 || file === undefined){
-            return "http://mingbopeng.github.io/DesignExplorer/img/thorntontomasetti.jpg";
+            return "img/thorntontomasetti.jpg";
         }
- 
-
 
         if (file.startsWith("http")) {
             // file is a valid full Url path
             // file: http://abcd.com/img01.png      
             link = file;
             
+        } else if (_folderInfo.type === "localZip") {
+            link = _zipFiles[file] || "img/thorntontomasetti.jpg";
         } else {        
             //loadImgfrom inputs
             // file: img01.png
@@ -206,6 +225,136 @@
         }
 
         return link;
+    }
+
+    var _zipFiles = {};
+
+    function loadLocalZip(file) {
+        Pace.restart();
+        
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var arrayBuffer = e.target.result;
+            JSZip.loadAsync(arrayBuffer).then(function(zip) {
+                var csvFileEntry = null;
+                zip.forEach(function (relativePath, zipEntry) {
+                    if (zipEntry.name.toLowerCase().endsWith("data.csv")) {
+                        csvFileEntry = zipEntry;
+                    }
+                });
+                
+                if (!csvFileEntry) {
+                    alert("Could not find data.csv inside the uploaded zip file!");
+                    return;
+                }
+                
+                var rootPrefix = "";
+                var lastSlash = csvFileEntry.name.lastIndexOf("/");
+                if (lastSlash !== -1) {
+                    rootPrefix = csvFileEntry.name.substring(0, lastSlash + 1);
+                }
+                
+                var promises = [];
+                _zipFiles = {}; // Clear old files
+                
+                zip.forEach(function(relativePath, zipEntry) {
+                    if (zipEntry.dir) return;
+                    
+                    var normalizedPath = zipEntry.name;
+                    if (rootPrefix && normalizedPath.startsWith(rootPrefix)) {
+                        normalizedPath = normalizedPath.substring(rootPrefix.length);
+                    }
+                    
+                    var promise;
+                    if (normalizedPath.toLowerCase().endsWith(".csv") || normalizedPath.toLowerCase().endsWith(".txt")) {
+                        promise = zipEntry.async("string").then(function(content) {
+                            _zipFiles[normalizedPath] = content;
+                        });
+                    } else if (normalizedPath.toLowerCase().endsWith(".json")) {
+                        promise = zipEntry.async("string").then(function(content) {
+                            var blob = new Blob([content], {type: "application/json"});
+                            _zipFiles[normalizedPath] = URL.createObjectURL(blob);
+                        });
+                    } else {
+                        promise = zipEntry.async("blob").then(function(blob) {
+                            var mimeType = "image/png";
+                            if (normalizedPath.toLowerCase().endsWith(".jpg") || normalizedPath.toLowerCase().endsWith(".jpeg")) {
+                                mimeType = "image/jpeg";
+                            } else if (normalizedPath.toLowerCase().endsWith(".gif")) {
+                                mimeType = "image/gif";
+                            }
+                            var typedBlob = new Blob([blob], {type: mimeType});
+                            _zipFiles[normalizedPath] = URL.createObjectURL(typedBlob);
+                        });
+                    }
+                    promises.push(promise);
+                });
+                
+                Promise.all(promises).then(function() {
+                    var csvKey = "data.csv";
+                    if (!(csvKey in _zipFiles)) {
+                        var actualCsvKey = csvFileEntry.name;
+                        if (rootPrefix && actualCsvKey.startsWith(rootPrefix)) {
+                            actualCsvKey = actualCsvKey.substring(rootPrefix.length);
+                        }
+                        csvKey = actualCsvKey;
+                    }
+                    
+                    var csvContent = _zipFiles[csvKey];
+                    if (!csvContent) {
+                        alert("Failed to read data.csv from zip!");
+                        return;
+                    }
+                    
+                    _folderInfo = {
+                        "DE_PW": "",
+                        "inLink": "",
+                        "url": "",
+                        "type": "localZip"
+                    };
+                    
+                    // Update project name
+                    var inputFileName = file.name.toUpperCase().replace(".ZIP", "");
+                    d3.select("p.navbar-brand").text(inputFileName);
+                    
+                    unloadPageContent();
+                    var parsedData = d3.csv.parse(csvContent);
+                    if (parsedData && parsedData.length > 0) {
+                        loadDataToDesignExplorer(parsedData);
+                        
+                        var settingFileKey = null;
+                        Object.keys(_zipFiles).forEach(function(key) {
+                            if (key.toLowerCase().startsWith("setting") && key.toLowerCase().endsWith(".json")) {
+                                settingFileKey = key;
+                            }
+                        });
+                        
+                        if (settingFileKey) {
+                            d3.json(_zipFiles[settingFileKey], function(error, settingData) {
+                                if (!error && settingData) {
+                                    _userSetting = settingData;
+                                    setSettings(graph, _userSetting);
+                                }
+                            });
+                        } else {
+                            loadSetting();
+                        }
+                        
+                        updateLayoutOnDeselect();
+                        d3.select("#welcome").style("display", "none");
+                    } else {
+                        alert("CSV parsing failed or CSV is empty!");
+                    }
+                }).catch(function(err) {
+                    console.error("Error processing zip contents:", err);
+                    alert("Error extracting zip file: " + err.message);
+                });
+            }).catch(function(err) {
+                console.error("Error loading zip file:", err);
+                alert("Failed to load zip file. Ensure it is a valid zip archive.");
+            });
+        };
+        reader.readAsArrayBuffer(file);
     }
 
 
@@ -274,6 +423,10 @@
                     <span class="icon-bar"></span>
                     <span class="icon-bar"></span>
                 </button>
+
+                <div class="navbar-header" title="Format">
+                    <a href="https://formatengineers.com/" target="_blank" style="font-family: 'Droid Sans Mono', monospace; font-size: 26px; font-weight: normal; color: #000; text-decoration: none; display: inline-block; padding-top: 10px; padding-left: 15px; letter-spacing: -0.5px;">format</a>
+                </div>
             </div>
 
             <!-- Collect the nav links, forms, and other content for toggling -->
@@ -340,10 +493,16 @@
                                     <button id="keep" class="btn btn-default btn-xs">Zoom to Selection</button>
                                     <button id="savecsv" class="btn btn-default btn-xs" onclick="saveToCSV()">Save Selection to File</button>
                                     <button id="stilllink" class="btn btn-default btn-xs" onclick="showStillLink()">My Static Link</button>
-
+                                    <a class="btn btn-default btn-xs" href="http://www.mpendesign.com/category/tutorial/" target="_blank">Tutorial</a>
+                                    <a class="btn btn-default btn-xs" href="https://www.thorntontomasetti.com/services/sustainability/" target="_blank">Services</a>
+                                    <a href="https://github.com/tt-acm/DesignExplorer/wiki" class="btn btn-default btn-xs" target="_blank">
+                                        Info <span class="glyphicon glyphicon-new-window"></span>
+                                    </a>
 
                                     <!-- Change label size -->
                                     <div class="btn-group col-xs-3" style="width: auto;float: right;">
+                                        <button id="dataSetting" class="btn btn-default btn-xs" onclick="dataSetting(graph)" title="Setting">Setting</button>
+                                        <button id="LL" class="btn btn-default btn-xs" onclick="changeLabelSize('largeLabel')" title="Large Label">L</button>
                                         <button id="MM" class="btn btn-default btn-xs" onclick="changeLabelSize('mediumLabel')" title="Medium Label">M</button>
                                         <button id="SS" class="btn btn-default btn-xs" onclick="changeLabelSize('smallLabel')" title="Small Label">S</button>
                                         <button id="pcFullScreen-toggle" class="btn btn-default btn-xs" title="Full Screen">
@@ -372,8 +531,8 @@
                                     <button type="button" class="btn btn-default btn-xs" id="scatter-fullscreen-toggle" title="Full Screen">
                                         <span class="glyphicon glyphicon-triangle-left" aria-hidden="true"></span>
                                     </button>
-                                    <a id="copyRightButton" href="https://formatengineers.com/" class="btn btn-default btn-xs" target="_blank" style="width: calc(100% - 46px);">
-                                        format engineers
+                                    <a id="copyRightButton" href="http://core.thorntontomasetti.com/" class="btn btn-default btn-xs" target="_blank" style="width: calc(100% - 46px);">
+                                        &copy; 2019 Thornton Tomasetti
                                     </a>
                                     <!--<button type="button" class="btn btn-default btn-xs" id="rcgraph" data-toggle="collapse" data-target="#radarChart">
                                         <span class="glyphicon glyphicon-triangle-bottom" aria-hidden="true"></span>
@@ -464,27 +623,48 @@
 
 
                 </div>
-            
-
             </div>
             <!-- /#Welcome content -->
             <div class="row-fluid col-lg-12 row-centered vertical-center fullscreen popupWindow" id="welcome">
-                
                 <div class="col-sm-12 col-centered" id="welcomeContainer">
                     <button class="btn btn-default btn-sm pull-right popupWindowClose">
                         <span class="glyphicon glyphicon-remove"></span>
                     </button>
+                    <br>
+                    <h1 class="text-center" style="margin-top: 1em;"> Welcome to Design Explorer!</h1>
+                    <h4 class="text-center">
+                        Design Explorer is an open source tool for exploring multi-dimensional parametric studies!
+                    </h4>
+                    <br>
 
-
-                    
+                    <h5 class="text-center">Try one of following sample design sets or load your own data.<a href="http://www.mpendesign.com/category/tutorial/" target="_blank"> (Tutorial)</a></h5> 
+                    <h5 class="text-center"></h5>
+                    <div class="row">
+                        <div class="col-sm-4">
+                            <img src="img/RedBox.gif" class="sampleImage image-rounded" id="sample1">
+                        </div>
+                        <div class="col-sm-4">
+                            <img src="img/Daylighting.gif" class="sampleImage image-rounded" id="sample2">
+                        </div>
+                        <div class="col-sm-4">
+                            <img src="img/BoxBuilding.gif" class="sampleImage image-rounded" id="sample3">
+                        </div>
+                        <br>
+                        <br>
+                    </div>
                     <div class="col-lg-12" style="position: absolute;bottom: 2em;width: calc(100% - 60px);">
                         <h3 class="text-center"> Happy Exploring! </h3>
-                        <h5 class="text-center">v_1 (05/10/2021)</h5>
+                        <h5 class="text-center">v2 (08/15/2019)</h5>
                         <br>
                         <h5 class="text-center">
-                            Format Engineers |
-                            <a href="https://formatengineers.com/about.html" target="_blank"> About</a> |
-                            <a href="https://formatengineers.com/contact-us.html" target="_blank">Contact</a>
+                            &copy; CORE studio | Thornton Tomasetti |
+                            <a href="http://core.thorntontomasetti.com/about" target="_blank"> About</a> |
+                            <a href="http://core.thorntontomasetti.com/about/services" target="_blank">Services</a> |
+                            <a href="http://core.thorntontomasetti.com/about/contact" target="_blank">Contact</a>
+                        </h5>
+                        <h5 class="text-center">
+                            Updated by
+                            <a href="http://www.mpendesign.com" target="_blank">Mingbo Peng</a>
                         </h5>
                     </div>
                 </div>
@@ -499,11 +679,16 @@
                         From the cloud:
                     </h4>
                     <p class="text-center">
-                        <input type="text" id="folderLink" class="btn btn-default btn-sm toggled" name="imgfolder" placeholder="GoogleDrive, OneDrive, or server link"
-                        />
-                        <input type="text" id="folderLinkID" class="btn btn-default btn-hd" name="imgfolder" placeholder="FolderID" />
+                        <input type="text" id="folderLink" class="btn btn-default btn-sm toggled" name="imgfolder" placeholder="GoogleDrive, OneDrive, or server link" style="width: 300px; border-radius: 20px 0 0 20px; height: 2.2em;" />
                         <button id="loadData" onclick="MP_getGoogleIDandLoad()" class="file-upload" style="border-radius:0 20px 20px 0;">Load Data</button>
                     </p>
+                    <p class="text-center" style="margin-top: 10px;">
+                        <input type="text" id="gdriveApiKey" class="btn btn-default btn-sm" name="gdriveApiKey" placeholder="Google API Key (Optional / required for Google Drive)" style="width: 420px; border-radius: 20px; height: 2.2em;" />
+                    </p>
+                    <h5 class="text-center" style="color: #9d9d9d; font-size: 11px; margin-top: 5px;">
+                        To access Google Drive folders, you must supply a Google API Key. 
+                        <a href="https://console.cloud.google.com/" target="_blank" style="color: #5bc0de; text-decoration: underline;">Create one here</a>.
+                    </h5>
                     <h5 class="text-center" style="color: #9d9d9d;">Please put data.csv, images, and 3D-json files into the same folder.(<a href="design_explorer_data/example/online/example.zip"
                             target="_blank">example.zip</a>)</h5>
                     
@@ -512,19 +697,12 @@
                             Or
                         </h4>
                         <p class="text-center">
-                            <input type="file" id="csv-file" class="btn btn-default btn-sm" name="files">
+                            <input type="file" id="csv-file" class="btn btn-default btn-sm" name="files" accept=".csv,.txt,.zip">
                         </p>
-                        <h5 class="text-center" style="color: #9d9d9d;">Please put valid images and 3D-json files URL. (Example:<a href="design_explorer_data/example/LocalCSV_example.csv" target="_blank">data.csv</a>)</h5>
+                        <h5 class="text-center" style="color: #9d9d9d;">Upload a <strong>.zip</strong> containing data.csv, images, and JSONs, OR upload a <strong>.csv</strong> with online URLs.</h5>
                     </div>
                     
                 </div>
-
-            </div>
-
-
-
-
-
 
             </div>
 
@@ -641,6 +819,42 @@
 
     </script>
 
+    <!-- welcome div  -->
+    <script type="text/javascript">
+        sampleFiles = {
+            1: "design_explorer_data/LittleRedBox.csv",
+            2: "design_explorer_data/default_onload.csv",
+            3: "design_explorer_data/AIA building.csv"
+        };
+
+        sampleSettingFiles = {
+            1: "design_explorer_data/RedBox/settings.json",
+            2: "design_explorer_data/DefaultData/settings.json",
+            3: "design_explorer_data/AIAbuilding/settings.json"
+        };
+
+        d3.selectAll(".sampleImage")
+            .on("click", function () {
+                var selSample = d3.select(this);
+                var id = selSample[0][0].id.replace("sample", "");
+
+                var filePath = sampleFiles[id];
+                var settingFilePath =sampleSettingFiles[id];
+
+                // remove the current selection
+                unloadPageContent();
+
+                d3.select("div#welcome").style("display", "none");
+
+                // load the new file
+                d3.csv(filePath, function (data) {
+                    loadDataToDesignExplorer(data);
+                    loadSetting(settingFilePath);
+                    });
+
+            });
+
+    </script>
 
     <!-- right side chart -->
     <script type="text/javascript">
@@ -1255,10 +1469,7 @@
         var pcIsColoredBy;
 
         var color = d3.scale.linear()
-        // D10000
-        // #c9c9c9
-        // #F5AD28
-            .range(["#0f0f0f", "#F5AD28"]);
+            .range(["#3182bd", "#f33"]);
 
 
         var scatterHeight = d3.select("#ScChartWrapper").style("height").replace("px", "");
@@ -1346,7 +1557,7 @@
         function updateLabels() {
             // modify labels
             var inputLabelColor = "black",
-                outputLabelColor = "rgb( 220, 147, 10)",
+                outputLabelColor = "steelblue",
                 inputLabels = d3.keys(inputData[0]),
                 outputLabels = d3.keys(outputData[0]),
                 colorset = []; //color set for lables
@@ -1979,16 +2190,38 @@
                 alert("Please use modern browsers to ensure the maximized experience.\n\nGoogle Chrome, or Firefox is suggested to use.");
             }
             
+            // Populate Google Drive API Key input if saved
+            var savedApiKey = localStorage.getItem('gdrive_api_key');
+            var apiKeyInput = document.getElementById("gdriveApiKey");
+            if (apiKeyInput && savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+            }
+
             if (window.location.href.toUpperCase().search("GFOLDER") > 0 || window.location.href.toUpperCase().search("ID=") > 0) {
                 // this is old user with google drive files.
                 d3.select("#welcome").style("display", "none");
+                
+                // Parse API key from URL parameters if present
+                var inUrl = window.location.href;
+                var urlVars = getUrlVars(inUrl);
+                if (urlVars.GKEY !== undefined) {
+                    Gkey = urlVars.GKEY;
+                    localStorage.setItem('gdrive_api_key', Gkey);
+                    if (apiKeyInput) apiKeyInput.value = Gkey;
+                } else if (urlVars.KEY !== undefined) {
+                    Gkey = urlVars.KEY;
+                    localStorage.setItem('gdrive_api_key', Gkey);
+                    if (apiKeyInput) apiKeyInput.value = Gkey;
+                }
+
                 MP_getGoogleIDandLoad("URL");
             } else {
                 // load default data
                 //parse the csv data from the design_explorer_data folder
-                d3.csv("design_explorer_data/LittleRedBox.csv", function (data) {
+                Pace.restart();
+                d3.csv("design_explorer_data/default_onload.csv", function (data) {
                     loadDataToDesignExplorer(data);
-                    loadSetting("design_explorer_data/RedBox/settings.json");
+                    loadSetting("design_explorer_data/DefaultData/settings.json");
                     });
 
             }
@@ -2028,46 +2261,43 @@
                 //clean whatever was added via Google
                 document.getElementById("folderLinkID").value = "";
 
-                unloadPageContent();
-
-
                 var file = fileInput.files[0];
-                var reader = new FileReader();
+                if (!file) return;
 
-                var regex = /^([a-zA-Z0-9\s_\\.\-:])+(.csv|.txt)$/;
+                var fileNameLower = file.name.toLowerCase();
 
-
-                if (regex.test(file.name.toLowerCase())) {
+                if (fileNameLower.endsWith(".zip")) {
+                    loadLocalZip(file);
+                } else if (fileNameLower.endsWith(".csv") || fileNameLower.endsWith(".txt")) {
+                    unloadPageContent();
+                    var reader = new FileReader();
 
                     // Update project name
-                    var inputFileName = file.name.toUpperCase().replace(".CSV", "");
-
+                    var inputFileName = file.name.toUpperCase().replace(".CSV", "").replace(".TXT", "");
                     d3.select("p.navbar-brand").text(inputFileName);
 
+                    Pace.restart();
                     reader.onload = function (e) {
-
                         var inputString = e.target.result;
-
-                        // I need to add some defense here
-                        // separateInputOutputs(e);
-
                         var data = d3.csv.parse(inputString);
 
-                        //originalDataLength = data.length;
-
                         if (data !== null) {
+                            _folderInfo = {
+                                "DE_PW": "",
+                                "inLink": "",
+                                "url": "",
+                                "type": "localCsv"
+                            };
+
                             loadDataToDesignExplorer(data);
                             loadSetting();
-                            };
+                        }
                     };
-
-
+                    reader.readAsText(file);
+                    d3.select("#welcome").style("display", "none");
                 } else {
-                    alert("Please upload a valid CSV file!");
+                    alert("Please upload a valid CSV or ZIP file!");
                 }
-
-                reader.readAsText(file);
-                d3.select("#welcome").style("display", "none");
             });
 
         }; // end of window.onload
@@ -2935,30 +3165,34 @@
             
             var jsonFileLink = "";
 
-            if(settingFilePath!==undefined){
-                jsonFileLink =settingFilePath;
-            }else{
-
-                var settingFiles =  d3.keys(_googleReturnObj.settingFiles);
-                if (settingFiles.length ==0) {
-                     jsonFileLink = "design_explorer_data/settings.json"
-
-                }else {
-
+            if (settingFilePath !== undefined) {
+                jsonFileLink = settingFilePath;
+            } else if (_folderInfo.type === "localZip") {
+                var settingKey = Object.keys(_zipFiles).find(function(key) {
+                    return key.toLowerCase().startsWith("setting") && key.toLowerCase().endsWith(".json");
+                });
+                if (settingKey) {
+                    jsonFileLink = _zipFiles[settingKey];
+                }
+            }
+            
+            if (jsonFileLink === "") {
+                var settingFiles = d3.keys(_googleReturnObj.settingFiles);
+                if (settingFiles.length == 0) {
+                     jsonFileLink = "design_explorer_data/settings.json";
+                } else {
                     var jsonFile = settingFiles[0];
                     jsonFileLink = _googleReturnObj.settingFiles[jsonFile];
                 }
-
-                
             }
 
             d3.json(jsonFileLink, function (d) {
-                //updata to global _userSetting
-                _userSetting = d;
-                setSettings(graph,_userSetting);
-            })
-
-            
+                if (d) {
+                    //updata to global _userSetting
+                    _userSetting = d;
+                    setSettings(graph,_userSetting);
+                }
+            });
         }
 
 
