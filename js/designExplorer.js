@@ -106,7 +106,7 @@ function getUrlVars(rawUrl) {
     return vars;
 }
 
-var Gkey = localStorage.getItem('gdrive_api_key') || "AIzaSyALPI3DXNxFPuHHdh78ZJhw1Emn6XmpHhY";
+var Gkey = localStorage.getItem('gdrive_api_key') || "";
 var BitlyKey = "52e99e2d788d32ae8ea99007d96917ac4ba50a5a";
 
 function prepareGFolder(folderLink) {
@@ -136,7 +136,7 @@ function prepareGFolder(folderLink) {
 
         if (error) {
             console.error("Error loading folder contents:", error);
-            alert("Error listing Google Drive folder files.\n\nThe API key may have expired or is invalid, or the folder is not shared publicly ('Anyone with the link can view').\n\nYou can configure a new API key in the 'Get Data' popup.\n\nError details: " + (error.statusText || error.responseText || "Connection failed"));
+            alert("Error listing Google Drive folder files.\n\nThe API key may have expired, is invalid, or was not provided, or the folder is not shared publicly ('Anyone with the link can view').\n\nYou can configure a new API key in the 'Get Data' popup.\n\nError details: " + (error.statusText || error.responseText || "Connection failed"));
             return;
         }
 
@@ -151,7 +151,7 @@ function prepareGFolder(folderLink) {
                 //googleReturnObj[item.name]=item.id
 
                 if(item.mimeType === "text/csv"){
-                    GLink = "https://www.googleapis.com/drive/v3/files/" + item.id + "?alt=media&key=" + Gkey;
+                    GLink = "https://www.googleapis.com/drive/v3/files/" + item.id + "?alt=media&supportsAllDrives=true&key=" + Gkey;
                     //this item is a data csv file
                     csvFiles[item.name] = GLink;
                     
@@ -161,7 +161,7 @@ function prepareGFolder(folderLink) {
                     imgFiles[item.name] = GLink;
 
                 }else if(item.mimeType === "application/json"){
-                    GLink = "https://www.googleapis.com/drive/v3/files/" + item.id + "?alt=media&key=" + Gkey;
+                    GLink = "https://www.googleapis.com/drive/v3/files/" + item.id + "?alt=media&supportsAllDrives=true&key=" + Gkey;
 
                     if (item.name.startsWith("setting")) {
                         //this item is a Design Explore's setting file 
@@ -241,7 +241,11 @@ function prepareGFolder(folderLink) {
 
         }else { //this is the last page, so return googleReturnObj directly
             
-            var csvFile = _googleReturnObj.csvFiles["data.csv"];
+            // Case-insensitive lookup for data.csv
+            var csvFileKey = Object.keys(_googleReturnObj.csvFiles).find(function(key) {
+                return key.toLowerCase() === "data.csv";
+            });
+            var csvFile = csvFileKey ? _googleReturnObj.csvFiles[csvFileKey] : undefined;
             
             if (csvFile === undefined) {
                 alert("Could not find the data.csv file in this folder, please double check!");
@@ -344,7 +348,7 @@ function checkInputLink(link, callback){
 
         var GFolderID = getGFolderID(link);
         //folderLinkObj.DE_PW = "DE_G"; 
-        folderLinkObj.url ="https://www.googleapis.com/drive/v3/files?q=%27" + GFolderID + "%27+in+parents&key=" +Gkey;
+        folderLinkObj.url ="https://www.googleapis.com/drive/v3/files?q=%27" + GFolderID + "%27+in+parents&supportsAllDrives=true&includeItemsFromAllDrives=true&key=" +Gkey;
         folderLinkObj.type = "GoogleDrive";
 
     }else if (link.includes("1drv.ms")){

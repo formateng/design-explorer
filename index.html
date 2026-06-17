@@ -697,7 +697,10 @@
                             Or
                         </h4>
                         <p class="text-center">
-                            <input type="file" id="csv-file" class="btn btn-default btn-sm" name="files" accept=".csv,.txt,.zip">
+                            <label for="csv-file" class="btn btn-default btn-sm" style="border-radius: 20px; padding: 6px 20px; cursor: pointer; display: inline-block;">
+                                <span class="glyphicon glyphicon-open"></span> Select CSV or ZIP File
+                            </label>
+                            <input type="file" id="csv-file" name="files" accept=".csv,.txt,.zip" style="display: none;">
                         </p>
                         <h5 class="text-center" style="color: #9d9d9d;">Upload a <strong>.zip</strong> containing data.csv, images, and JSONs, OR upload a <strong>.csv</strong> with online URLs.</h5>
                     </div>
